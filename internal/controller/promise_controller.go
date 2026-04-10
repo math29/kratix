@@ -81,6 +81,10 @@ type PromiseReconciler struct {
 	ReconciliationInterval    time.Duration
 	EventRecorder             record.EventRecorder
 	PromiseUpgrade            bool
+	// RBACConfig controls Kratix's aggregation-based RBAC feature.
+	// When enabled, the reconciler creates per-Promise companion ClusterRoles that
+	// automatically aggregate into the configured aggregate ClusterRoles.
+	RBACConfig RBACConfig
 }
 
 const (
@@ -1362,6 +1366,10 @@ func (r *PromiseReconciler) createResourcesForDynamicControllerIfTheyDontExist(c
 
 	if err != nil {
 		return fmt.Errorf("error creating/updating cluster role binding: %w", err)
+	}
+
+	if err = r.createPerPromiseRBACRoles(ctx, promise, rrGVK.Group, rrCRD.Spec.Names.Plural); err != nil {
+		return fmt.Errorf("error creating per-Promise RBAC companion roles: %w", err)
 	}
 
 	logging.Info(logger, "finished creating resources for dynamic controller")

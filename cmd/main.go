@@ -81,6 +81,10 @@ type KratixConfig struct {
 	Telemetry                *telemetry.Config     `json:"telemetry,omitempty"`
 	Logging                  *LoggingConfig        `json:"logging,omitempty"`
 	FeatureFlags             *FeatureFlags         `json:"featureFlags,omitempty"`
+	// RBAC enables Kratix's aggregation-based RBAC feature.
+	// When set, Kratix creates static aggregate ClusterRoles at startup and
+	// per-Promise companion ClusterRoles on every Promise reconciliation.
+	RBAC *controller.RBACConfig `json:"rbac,omitempty"`
 }
 
 type FeatureFlags struct {
@@ -283,6 +287,7 @@ func main() {
 		ReconciliationInterval: getRegularReconciliationInterval(kratixConfig),
 		EventRecorder:          mgr.GetEventRecorderFor("PromiseController"),
 		PromiseUpgrade:         promiseUpgradeEnabled(kratixConfig),
+		RBACConfig:             getRBACConfig(kratixConfig),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Promise")
 		os.Exit(1)
@@ -420,6 +425,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Bootstrap static aggregate RBAC ClusterRoles if the RBAC feature is enabled.
+	// This is idempotent and safe to run on every leader election.
+	rbacCfg := getRBACConfig(kratixConfig)
+	if bootErr := controller.BootstrapAggregateRBAC(ctx, kClient, &rbacCfg); bootErr != nil {
+		setupLog.Error(bootErr, "unable to bootstrap aggregate RBAC ClusterRoles")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting manager")
 	err = mgr.Start(ctx)
 	setupLog.Info("manager stopped")
@@ -429,6 +442,14 @@ func main() {
 	}
 	setupLog.Info("shutting down")
 	os.Exit(0)
+}
+
+// getRBACConfig returns the RBACConfig from KratixConfig, or a zero value if nil.
+func getRBACConfig(cfg *KratixConfig) controller.RBACConfig {
+	if cfg == nil || cfg.RBAC == nil {
+		return controller.RBACConfig{}
+	}
+	return *cfg.RBAC
 }
 
 const numJobsToKeepDefault = 5
